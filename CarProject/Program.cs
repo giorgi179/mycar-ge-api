@@ -144,55 +144,25 @@ builder.Services.AddSwaggerGen();
 
 
 
-// =========================
-// Build App
-// =========================
-
 var app = builder.Build();
 
 
 
-
-// =========================
-// Development
-// =========================
-
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-
-    app.UseSwaggerUI();
-}
-
-
-
-// =========================
-// Static Files (Images)
-// =========================
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseStaticFiles();
 
-
-
-// =========================
-// Middleware
-// =========================
-
 app.UseCors("AllowAngular");
-
 
 app.UseHttpsRedirection();
 
-
 app.UseAuthentication();
-
 
 app.UseAuthorization();
 
-
+app.MapGet("/health", () => Results.Ok("OK"));
 
 app.MapControllers();
-
-
 
 app.Run();
