@@ -4,6 +4,8 @@ using CarProject.Models;
 using CarProject.Request;
 using CarProject.Response;
 using CarProject.Services;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -15,25 +17,52 @@ namespace CarProject.Controllers;
 [ApiController]
 public class UserController : ControllerBase
 {
-
     private readonly Base baza;
     private readonly ITokenService tokenService;
-    private readonly IWebHostEnvironment env;
+    private readonly Cloudinary _cloudinary;
     private readonly EmailSender emailSender = new EmailSender();
 
-    public UserController(Base context, ITokenService tokenService, IWebHostEnvironment env)
+    public UserController(Base context, ITokenService tokenService, Cloudinary cloudinary)
     {
         this.baza = context;
         this.tokenService = tokenService;
-        this.env = env;
+        this._cloudinary = cloudinary;
+    }
+
+    private async Task<string> UploadUserPhotoAsync(IFormFile file)
+    {
+        await using var stream = file.OpenReadStream();
+
+        var uploadParams = new ImageUploadParams
+        {
+            File = new FileDescription(file.FileName, stream),
+            Folder = "users"
+        };
+
+        var result = await _cloudinary.UploadAsync(uploadParams);
+
+        if (result.Error != null)
+            throw new Exception($"Photo upload failed: {result.Error.Message}");
+
+        return result.SecureUrl.ToString();
     }
 
     [HttpGet("get-all-users")]
     public ActionResult GetAllUsers()
     {
-        var getUsers = baza.Users.ToList();
+        var getUsers = baza.Users.Select(u => new
+        {
+            u.Id,
+            u.FirstName,
+            u.LastName,
+            u.Email,
+            u.UserUrl,
+            u.IsVerified
+        }).ToList();
+
         return Ok(getUsers);
     }
+
     [Authorize]
     [HttpGet("get-current-user")]
     public ActionResult GetCurrentUser()
@@ -89,18 +118,7 @@ public class UserController : ControllerBase
                 return BadRequest("File size must not exceed 5MB.");
             }
 
-            var uploadsFolder = Path.Combine(env.WebRootPath ?? "wwwroot", "uploads", "users");
-            Directory.CreateDirectory(uploadsFolder);
-
-            var uniqueFileName = $"{Guid.NewGuid()}{extension}";
-            var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-
-            using (var stream = new FileStream(filePath, FileMode.Create))
-            {
-                await request.UserPhoto.CopyToAsync(stream);
-            }
-
-            userUrl = $"/uploads/users/{uniqueFileName}";
+            userUrl = await UploadUserPhotoAsync(request.UserPhoto);
         }
 
         Random random = new Random();
@@ -116,7 +134,6 @@ public class UserController : ControllerBase
             VerificationCode = verificationCode,
             VerificationCodeExpiry = DateTime.UtcNow.AddMinutes(10),
             IsVerified = false,
-            
         };
 
         baza.Users.Add(user);
@@ -226,6 +243,7 @@ public class UserController : ControllerBase
             RefreshToken = refreshToken
         });
     }
+
     [HttpPost("refresh-token")]
     public ActionResult RefreshToken([FromBody] RefreshTokenRequest request)
     {
@@ -249,6 +267,7 @@ public class UserController : ControllerBase
             RefreshToken = newRefreshToken
         });
     }
+
     [HttpDelete("delete-user")]
     public ActionResult DeleteUser([FromBody] string email)
     {
@@ -292,18 +311,7 @@ public class UserController : ControllerBase
             if (request.UserPhoto.Length > maxFileSize)
                 return BadRequest("File size must not exceed 5MB.");
 
-            var uploadsFolder = Path.Combine(env.WebRootPath ?? "wwwroot", "uploads", "users");
-            Directory.CreateDirectory(uploadsFolder);
-
-            var uniqueFileName = $"{Guid.NewGuid()}{extension}";
-            var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-
-            using (var stream = new FileStream(filePath, FileMode.Create))
-            {
-                await request.UserPhoto.CopyToAsync(stream);
-            }
-
-            user.UserUrl = $"/uploads/users/{uniqueFileName}";
+            user.UserUrl = await UploadUserPhotoAsync(request.UserPhoto);
         }
 
         baza.SaveChanges();
