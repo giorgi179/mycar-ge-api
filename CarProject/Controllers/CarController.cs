@@ -2,30 +2,48 @@
 using CarProject.Data;
 using CarProject.Models;
 using CarProject.Request;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using WebApplication1;
-using CloudinaryDotNet;
-using CloudinaryDotNet.Actions;
-namespace CarProject.Controllers;
+
+
 
 [Route("api/[controller]")]
 [ApiController]
 public class CarController : ControllerBase
 {
     private readonly Base baza;
-    private readonly IConfiguration _config;
+    private readonly Cloudinary _cloudinary;
 
-    public CarController(Base context, IConfiguration config)
+    public CarController(Base context, Cloudinary cloudinary)
     {
         baza = context;
-        _config = config;
+        _cloudinary = cloudinary;
     }
 
     EmailSender emailSender = new EmailSender();
+
+    private async Task<string> UploadToCloudinaryAsync(IFormFile file)
+    {
+        await using var stream = file.OpenReadStream();
+
+        var uploadParams = new ImageUploadParams
+        {
+            File = new FileDescription(file.FileName, stream),
+            Folder = "cars"
+        };
+
+        var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+
+        if (uploadResult.Error != null)
+            throw new Exception($"Cloudinary upload failed: {uploadResult.Error.Message}");
+
+        return uploadResult.SecureUrl.ToString();
+    }
 
     [HttpGet("get-all-car")]
     public ActionResult GetAllCar()
@@ -96,6 +114,7 @@ public class CarController : ControllerBase
 
         return Ok(cars);
     }
+
     [HttpGet("get-manufacturers")]
     public ActionResult GetManufacturers()
     {
@@ -212,56 +231,30 @@ public class CarController : ControllerBase
 
         baza.CarDetals.Add(details);
 
-        // ─── Cloudinary ატვირთვა (disk-ის ნაცვლად) ───
-        var account = new CloudinaryDotNet.Account(
-            _config["Cloudinary:CloudName"],
-            _config["Cloudinary:ApiKey"],
-            _config["Cloudinary:ApiSecret"]);
-        var cloudinary = new CloudinaryDotNet.Cloudinary(account);
-
+        // ─── Cloudinary ატვირთვა ───
         int index = 0;
 
         foreach (var image in request.Images)
         {
-            using var stream = image.OpenReadStream();
-            var uploadParams = new CloudinaryDotNet.Actions.ImageUploadParams
-            {
-                File = new CloudinaryDotNet.Actions.FileDescription(image.FileName, stream),
-                Folder = "cars"
-            };
-
-            var uploadResult = await cloudinary.UploadAsync(uploadParams);
-
-            if (uploadResult.StatusCode != System.Net.HttpStatusCode.OK)
-            {
-                return StatusCode(500, "Image upload failed.");
-            }
-
-            string imageUrl = uploadResult.SecureUrl.ToString();
+            string imageUrl = await UploadToCloudinaryAsync(image);
 
             if (index == 0)
             {
                 newCar.CarImg = imageUrl;
             }
 
-            baza.CarImages.Add(
-                new CarImage
-                {
-                    ImageUrl = imageUrl,
-                    CarId = newCar.Id
-                }
-            );
+            baza.CarImages.Add(new CarImage
+            {
+                ImageUrl = imageUrl,
+                CarId = newCar.Id
+            });
 
             index++;
         }
 
         baza.SaveChanges();
 
-        return Ok(new
-        {
-            message = "Car added successfully",
-            carId = newCar.Id
-        });
+        return Ok(new { message = "Car added successfully", carId = newCar.Id });
     }
 
     [HttpDelete("car-{id}-detele")]
@@ -276,7 +269,4 @@ public class CarController : ControllerBase
 
         return Ok("Successful Remove");
     }
-
-
-
 }
