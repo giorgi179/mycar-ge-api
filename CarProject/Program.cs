@@ -2,10 +2,19 @@ using System.Text;
 using System.Text.Json.Serialization;
 using CarProject.Data;
 using CarProject.Services;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+
+var cloudinary = new Cloudinary(new Account("cloud", "key", "secret"));
+var uploadParams = new ImageUploadParams
+{
+    File = new FileDescription(@"C:\path\to\file.jpg")
+};
+var result = cloudinary.Upload(uploadParams);
 
 var builder = WebApplication.CreateBuilder(args);
 

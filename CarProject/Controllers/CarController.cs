@@ -8,7 +8,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using WebApplication1;
-
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 namespace CarProject.Controllers;
 
 [Route("api/[controller]")]
@@ -16,10 +17,12 @@ namespace CarProject.Controllers;
 public class CarController : ControllerBase
 {
     private readonly Base baza;
+    private readonly IConfiguration _config;
 
-    public CarController(Base context)
+    public CarController(Base context, IConfiguration config)
     {
         baza = context;
+        _config = config;
     }
 
     EmailSender emailSender = new EmailSender();
@@ -128,7 +131,7 @@ public class CarController : ControllerBase
 
     [Authorize]
     [HttpPost("add-car")]
-    public ActionResult AddCar([FromForm] CarRequest request)
+    public async Task<ActionResult> AddCar([FromForm] CarRequest request)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (userIdClaim == null || !int.TryParse(userIdClaim, out int userId))
@@ -159,13 +162,7 @@ public class CarController : ControllerBase
 
             var ext = Path.GetExtension(image.FileName).ToLower();
 
-            string[] allowed =
-            {
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".webp"
-            };
+            string[] allowed = { ".jpg", ".jpeg", ".png", ".webp" };
 
             if (!allowed.Contains(ext))
             {
@@ -215,30 +212,32 @@ public class CarController : ControllerBase
 
         baza.CarDetals.Add(details);
 
-        string folder = Path.Combine(
-            Directory.GetCurrentDirectory(),
-            "wwwroot/images/cars"
-        );
-
-        if (!Directory.Exists(folder))
-            Directory.CreateDirectory(folder);
+        // ─── Cloudinary ატვირთვა (disk-ის ნაცვლად) ───
+        var account = new CloudinaryDotNet.Account(
+            _config["Cloudinary:CloudName"],
+            _config["Cloudinary:ApiKey"],
+            _config["Cloudinary:ApiSecret"]);
+        var cloudinary = new CloudinaryDotNet.Cloudinary(account);
 
         int index = 0;
 
         foreach (var image in request.Images)
         {
-            string fileName =
-                Guid.NewGuid().ToString()
-                + Path.GetExtension(image.FileName);
-
-            string path = Path.Combine(folder, fileName);
-
-            using (var stream = new FileStream(path, FileMode.Create))
+            using var stream = image.OpenReadStream();
+            var uploadParams = new CloudinaryDotNet.Actions.ImageUploadParams
             {
-                image.CopyTo(stream);
+                File = new CloudinaryDotNet.Actions.FileDescription(image.FileName, stream),
+                Folder = "cars"
+            };
+
+            var uploadResult = await cloudinary.UploadAsync(uploadParams);
+
+            if (uploadResult.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                return StatusCode(500, "Image upload failed.");
             }
 
-            string imageUrl = "/images/cars/" + fileName;
+            string imageUrl = uploadResult.SecureUrl.ToString();
 
             if (index == 0)
             {
